@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = 'https://chimera-dataflow-app-1026419041222.us-central1.run.app';
 
 async function fetchApi(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
