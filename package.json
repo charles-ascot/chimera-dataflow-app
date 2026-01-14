@@ -1,0 +1,8 @@
+{
+  "name": "chimera-dataflow-app",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "postbuild": "cp -r frontend/dist ."
+  }
+}
