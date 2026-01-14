@@ -53,7 +53,7 @@ app = FastAPI(
 # CORS configuration for Cloudflare Pages frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://chimera-dataflow.pages.dev"],
+    allow_origins=["https://chimera-dataflow-app.pages.dev"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
