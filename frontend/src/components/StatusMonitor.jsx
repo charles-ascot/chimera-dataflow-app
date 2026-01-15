@@ -135,7 +135,7 @@ export default function StatusMonitor({ job, jobIdFromUrl, onReset, onViewHistor
           {status.createdAt && (
             <div className="stats-row">
               <span>Created</span>
-              <span>{new Date(status.createdAt).toLocaleString()}</span>
+              <span>{formatDate(status.createdAt)}</span>
             </div>
           )}
         </div>
@@ -331,4 +331,31 @@ function formatDuration(seconds) {
   const hours = Math.floor(mins / 60)
   const remainingMins = mins % 60
   return `${hours}h ${remainingMins}m`
+}
+
+function formatDate(dateValue) {
+  if (!dateValue) return '-'
+  try {
+    // Handle various date formats
+    let date
+    if (typeof dateValue === 'string') {
+      // Try parsing ISO string or other formats
+      date = new Date(dateValue)
+    } else if (dateValue._seconds) {
+      // Firestore timestamp format
+      date = new Date(dateValue._seconds * 1000)
+    } else if (dateValue.seconds) {
+      // Another Firestore timestamp format
+      date = new Date(dateValue.seconds * 1000)
+    } else {
+      date = new Date(dateValue)
+    }
+
+    if (isNaN(date.getTime())) {
+      return '-'
+    }
+    return date.toLocaleString()
+  } catch {
+    return '-'
+  }
 }

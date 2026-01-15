@@ -49,6 +49,26 @@ export default function JobHistory({ onSelectJob }) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  const formatDate = (dateValue) => {
+    if (!dateValue) return '-'
+    try {
+      let date
+      if (typeof dateValue === 'string') {
+        date = new Date(dateValue)
+      } else if (dateValue._seconds) {
+        date = new Date(dateValue._seconds * 1000)
+      } else if (dateValue.seconds) {
+        date = new Date(dateValue.seconds * 1000)
+      } else {
+        date = new Date(dateValue)
+      }
+      if (isNaN(date.getTime())) return '-'
+      return date
+    } catch {
+      return null
+    }
+  }
+
   const getProcessLabel = (type) => {
     const labels = {
       'decompress_only': 'Decomp',
@@ -127,16 +147,21 @@ export default function JobHistory({ onSelectJob }) {
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 <td style={tdStyle}>
-                  {new Date(job.createdAt).toLocaleDateString()}
+                  {(() => {
+                    const date = formatDate(job.createdAt)
+                    return date ? date.toLocaleDateString() : '-'
+                  })()}
                   <div style={{ fontSize: '10px', color: '#666' }}>
-                    {new Date(job.createdAt).toLocaleTimeString()}
+                    {(() => {
+                      const date = formatDate(job.createdAt)
+                      return date ? date.toLocaleTimeString() : ''
+                    })()}
                   </div>
                 </td>
                 <td style={tdStyle}>
                   {job.sourceDataset}
                   <div style={{ fontSize: '10px', color: '#666' }}>
-                    {job.startDate}
-                    {job.endDate && job.endDate !== job.startDate ? ` - ${job.endDate}` : ''}
+                    {job.selectedPaths?.length || 0} item{job.selectedPaths?.length !== 1 ? 's' : ''} selected
                   </div>
                 </td>
                 <td style={tdStyle}>

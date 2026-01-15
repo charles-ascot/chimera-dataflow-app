@@ -45,21 +45,8 @@ export default function SubmitSection({
           <span>{sourceConfig.dataset?.path || '-'}</span>
         </div>
         <div className="stats-row">
-          <span>Date Range</span>
-          <span>
-            {sourceConfig.startDate || '-'}
-            {sourceConfig.endDate && sourceConfig.endDate !== sourceConfig.startDate
-              ? ` to ${sourceConfig.endDate}`
-              : ''}
-          </span>
-        </div>
-        <div className="stats-row">
-          <span>Files</span>
-          <span>{sourceConfig.fileCount.toLocaleString()}</span>
-        </div>
-        <div className="stats-row">
-          <span>Size</span>
-          <span>{sourceConfig.totalSize || '-'}</span>
+          <span>Selected Items</span>
+          <span>{sourceConfig.selectedPaths?.length || 0}</span>
         </div>
       </div>
 
@@ -129,17 +116,12 @@ export default function SubmitSection({
           Select a dataset to continue
         </div>
       )}
-      {sourceConfig.dataset && !sourceConfig.startDate && (
+      {sourceConfig.dataset && (!sourceConfig.selectedPaths || sourceConfig.selectedPaths.length === 0) && (
         <div className="batch-warning" style={{ marginTop: '16px' }}>
-          Select a start date to continue
+          Select items from the data browser to continue
         </div>
       )}
-      {sourceConfig.startDate && sourceConfig.fileCount === 0 && (
-        <div className="batch-warning" style={{ marginTop: '16px' }}>
-          No files found for selected date range
-        </div>
-      )}
-      {sourceConfig.fileCount > 0 && !targetBucket && (
+      {sourceConfig.selectedPaths?.length > 0 && !targetBucket && (
         <div className="batch-warning" style={{ marginTop: '16px' }}>
           Select or create a target bucket
         </div>
