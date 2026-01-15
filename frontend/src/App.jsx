@@ -16,8 +16,7 @@ function Dashboard() {
     project: null,
     bucket: null,
     dataset: null,
-    startDate: '',
-    endDate: '',
+    selectedPaths: [],
     fileCount: 0,
     totalSize: ''
   })
@@ -49,7 +48,7 @@ function Dashboard() {
   const [activeJob, setActiveJob] = useState(null)
 
   const isSourceComplete = sourceConfig.project && sourceConfig.bucket &&
-    sourceConfig.dataset && sourceConfig.startDate && sourceConfig.fileCount > 0
+    sourceConfig.dataset && sourceConfig.selectedPaths?.length > 0
 
   const isTargetComplete = targetConfig.outputPrefix &&
     (targetConfig.useExisting ? targetConfig.bucket : targetConfig.newBucketName)
@@ -65,8 +64,7 @@ function Dashboard() {
         sourceProject: sourceConfig.project.id,
         sourceBucket: sourceConfig.bucket.name,
         sourceDataset: sourceConfig.dataset.path,
-        startDate: sourceConfig.startDate,
-        endDate: sourceConfig.endDate || sourceConfig.startDate,
+        selectedPaths: sourceConfig.selectedPaths,
         processType: processConfig.processType,
         outputShards: processConfig.outputShards,
         compression: processConfig.compression,
@@ -133,7 +131,7 @@ function Dashboard() {
       <header className="header">
         <div className="header-left">
           <h1 className="header-title">CHIMERA DataFlow</h1>
-          <p className="header-subtitle">Betfair Data Transport Pipeline</p>
+          <p className="header-subtitle">Betfair Data Transport Pipeline — Version 1.0</p>
         </div>
         <button className="button-logout" onClick={handleViewHistory}>
           Job History

@@ -25,8 +25,7 @@ class DataflowRunner:
         self,
         source_bucket: str,
         source_dataset: str,
-        start_date: str,
-        end_date: str,
+        selected_paths: list,
         process_type: str,
         output_shards: int,
         compression: str,
@@ -41,12 +40,16 @@ class DataflowRunner:
 
         job_id = f"{datetime.utcnow().strftime('%Y-%m-%d')}-{uuid.uuid4().hex[:8]}"
 
-        # Build input pattern
-        input_pattern = f"gs://{source_bucket}/{source_dataset}/"
-        if start_date == end_date:
-            input_pattern += f"{start_date}/**/*.bz2"
-        else:
-            input_pattern += f"**/*.bz2"  # Will filter by date in pipeline
+        # Build input patterns from selected paths
+        input_patterns = []
+        for path in selected_paths:
+            # Each path can be a folder or file
+            if path.endswith('/'):
+                input_patterns.append(f"gs://{source_bucket}/{path}**/*")
+            else:
+                # Check if it looks like a file or folder
+                input_patterns.append(f"gs://{source_bucket}/{path}/**/*")
+                input_patterns.append(f"gs://{source_bucket}/{path}")
 
         # Build output path
         output_path = f"gs://{target_bucket}/{output_prefix}/"
@@ -58,13 +61,12 @@ class DataflowRunner:
 
         # Pipeline parameters
         pipeline_params = {
-            "input_pattern": input_pattern,
+            "input_patterns": input_patterns,
             "output_path": output_path,
             "output_shards": str(output_shards),
             "compression": compression,
             "process_type": process_type,
-            "start_date": start_date,
-            "end_date": end_date,
+            "selected_paths": selected_paths,
         }
 
         try:
@@ -104,7 +106,7 @@ class DataflowRunner:
                     f"{region}/{dataflow_job_id}?project={self.project_id}"
                 ),
                 "config": {
-                    "inputPattern": input_pattern,
+                    "inputPatterns": input_patterns,
                     "outputPath": output_path,
                     "pipelineParams": pipeline_params,
                     "runtimeEnv": runtime_env,

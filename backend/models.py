@@ -43,8 +43,7 @@ class PipelineSubmitRequest(BaseModel):
     sourceProject: str
     sourceBucket: str
     sourceDataset: str
-    startDate: str
-    endDate: str
+    selectedPaths: List[str]  # List of selected folder/file paths
     processType: ProcessType
     outputShards: int = 10
     compression: CompressionType = CompressionType.NONE
@@ -96,7 +95,7 @@ class DatasetInfo(BaseModel):
     path: str
     fileCount: int
     totalSize: str
-    dateRange: DateRange
+    hasChildren: bool = False
 
 
 class DatasetsResponse(BaseModel):
@@ -172,8 +171,7 @@ class JobHistoryItem(BaseModel):
     jobId: str
     dataflowJobId: Optional[str] = None
     sourceDataset: str
-    startDate: str
-    endDate: str
+    selectedPaths: Optional[List[str]] = None
     processType: str
     targetBucket: str
     outputPrefix: str

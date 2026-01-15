@@ -35,6 +35,13 @@ export async function getDates(bucketName, datasetPath) {
   return fetchApi(`/api/gcp/datasets/${encodeURIComponent(bucketName)}/${encodeURIComponent(datasetPath)}/dates`);
 }
 
+export async function browsePath(bucketName, path = '') {
+  if (path) {
+    return fetchApi(`/api/gcp/buckets/${encodeURIComponent(bucketName)}/browse/${encodeURIComponent(path)}`);
+  }
+  return fetchApi(`/api/gcp/buckets/${encodeURIComponent(bucketName)}/browse`);
+}
+
 export async function checkBucketAvailability(bucketName) {
   return fetchApi(`/api/gcp/buckets/check/${encodeURIComponent(bucketName)}`);
 }

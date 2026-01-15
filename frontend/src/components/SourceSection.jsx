@@ -1,13 +1,107 @@
-import React, { useState, useEffect } from 'react'
-import { getProjects, getBuckets, getDatasets, getDates } from '../services/api'
+import React, { useState, useEffect, useCallback } from 'react'
+import { getProjects, getBuckets, getDatasets, browsePath } from '../services/api'
+
+// Tree node component for hierarchical browsing
+function TreeNode({ node, level, selectedPaths, onToggleSelect, onExpand, expandedPaths, bucketName }) {
+  const [children, setChildren] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const isExpanded = expandedPaths.has(node.path)
+  const isSelected = selectedPaths.has(node.path)
+  const isFolder = node.type === 'folder'
+  const indent = level * 20
+
+  const handleExpand = async () => {
+    if (!isFolder) return
+
+    if (isExpanded) {
+      onExpand(node.path, false)
+      return
+    }
+
+    if (children === null) {
+      setLoading(true)
+      try {
+        const data = await browsePath(bucketName, node.path)
+        setChildren([...data.folders, ...data.files])
+      } catch (err) {
+        console.error('Failed to load children:', err)
+        setChildren([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    onExpand(node.path, true)
+  }
+
+  const handleSelect = (e) => {
+    e.stopPropagation()
+    onToggleSelect(node.path, !isSelected, isFolder)
+  }
+
+  return (
+    <div className="tree-node">
+      <div
+        className={`tree-item ${isSelected ? 'selected' : ''}`}
+        style={{ paddingLeft: `${indent}px` }}
+        onClick={handleExpand}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={handleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="tree-checkbox"
+        />
+        {isFolder && (
+          <span className="tree-icon">
+            {loading ? '⏳' : isExpanded ? '📂' : '📁'}
+          </span>
+        )}
+        {!isFolder && <span className="tree-icon">📄</span>}
+        <span className="tree-name">{node.name}</span>
+        {isFolder && node.hasChildren && (
+          <span className="tree-meta">
+            {node.fileCount > 0 && `${node.fileCount} files`}
+            {node.totalSize && node.totalSize !== '0 B' && ` • ${node.totalSize}`}
+          </span>
+        )}
+        {!isFolder && (
+          <span className="tree-meta">{node.size}</span>
+        )}
+      </div>
+      {isExpanded && children && children.length > 0 && (
+        <div className="tree-children">
+          {children.map((child) => (
+            <TreeNode
+              key={child.path}
+              node={child}
+              level={level + 1}
+              selectedPaths={selectedPaths}
+              onToggleSelect={onToggleSelect}
+              onExpand={onExpand}
+              expandedPaths={expandedPaths}
+              bucketName={bucketName}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function SourceSection({ config, onChange }) {
   const [projects, setProjects] = useState([])
   const [buckets, setBuckets] = useState([])
   const [datasets, setDatasets] = useState([])
-  const [availableDates, setAvailableDates] = useState([])
-  const [loading, setLoading] = useState({ projects: false, buckets: false, datasets: false, dates: false })
+  const [loading, setLoading] = useState({ projects: false, buckets: false, datasets: false })
   const [error, setError] = useState(null)
+
+  // Data browser state
+  const [dataExpanded, setDataExpanded] = useState(false)
+  const [browserData, setBrowserData] = useState(null)
+  const [browserLoading, setBrowserLoading] = useState(false)
+  const [selectedPaths, setSelectedPaths] = useState(new Set())
+  const [expandedPaths, setExpandedPaths] = useState(new Set())
 
   // Load projects on mount
   useEffect(() => {
@@ -67,50 +161,42 @@ export default function SourceSection({ config, onChange }) {
     loadDatasets()
   }, [config.bucket])
 
-  // Load dates when dataset changes
+  // Load browser data when dataset changes
   useEffect(() => {
     if (!config.bucket || !config.dataset) {
-      setAvailableDates([])
+      setBrowserData(null)
+      setSelectedPaths(new Set())
+      setExpandedPaths(new Set())
+      setDataExpanded(false)
       return
     }
 
-    async function loadDates() {
-      setLoading(prev => ({ ...prev, dates: true }))
+    async function loadBrowserData() {
+      setBrowserLoading(true)
       try {
-        const data = await getDates(config.bucket.name, config.dataset.path)
-        setAvailableDates(data.availableDates || [])
+        const data = await browsePath(config.bucket.name, config.dataset.path)
+        setBrowserData(data)
+        setDataExpanded(true)
       } catch (err) {
         setError(err.message)
       } finally {
-        setLoading(prev => ({ ...prev, dates: false }))
+        setBrowserLoading(false)
       }
     }
-    loadDates()
+    loadBrowserData()
   }, [config.bucket, config.dataset])
 
-  // Calculate file count and size when dates change
+  // Update parent config when selection changes
   useEffect(() => {
-    if (!config.startDate || availableDates.length === 0) {
-      onChange(prev => ({ ...prev, fileCount: 0, totalSize: '' }))
-      return
-    }
-
-    const start = config.startDate
-    const end = config.endDate || config.startDate
-
-    let fileCount = 0
-    let totalBytes = 0
-
-    availableDates.forEach(d => {
-      if (d.date >= start && d.date <= end) {
-        fileCount += d.files
-        totalBytes += d.sizeBytes || 0
-      }
-    })
-
-    const totalSize = formatBytes(totalBytes)
-    onChange(prev => ({ ...prev, fileCount, totalSize }))
-  }, [config.startDate, config.endDate, availableDates])
+    const pathsArray = Array.from(selectedPaths)
+    const fileCount = pathsArray.length
+    onChange(prev => ({
+      ...prev,
+      selectedPaths: pathsArray,
+      fileCount,
+      totalSize: fileCount > 0 ? `${fileCount} items selected` : ''
+    }))
+  }, [selectedPaths])
 
   const handleProjectChange = (e) => {
     const project = projects.find(p => p.id === e.target.value)
@@ -119,8 +205,7 @@ export default function SourceSection({ config, onChange }) {
       project,
       bucket: null,
       dataset: null,
-      startDate: '',
-      endDate: '',
+      selectedPaths: [],
       fileCount: 0,
       totalSize: ''
     })
@@ -132,8 +217,7 @@ export default function SourceSection({ config, onChange }) {
       ...config,
       bucket,
       dataset: null,
-      startDate: '',
-      endDate: '',
+      selectedPaths: [],
       fileCount: 0,
       totalSize: ''
     })
@@ -144,11 +228,52 @@ export default function SourceSection({ config, onChange }) {
     onChange({
       ...config,
       dataset,
-      startDate: dataset?.dateRange?.start || '',
-      endDate: '',
+      selectedPaths: [],
       fileCount: 0,
       totalSize: ''
     })
+    setSelectedPaths(new Set())
+    setExpandedPaths(new Set())
+  }
+
+  const handleToggleSelect = useCallback((path, selected, isFolder) => {
+    setSelectedPaths(prev => {
+      const next = new Set(prev)
+      if (selected) {
+        next.add(path)
+      } else {
+        next.delete(path)
+      }
+      return next
+    })
+  }, [])
+
+  const handleExpand = useCallback((path, expanded) => {
+    setExpandedPaths(prev => {
+      const next = new Set(prev)
+      if (expanded) {
+        next.add(path)
+      } else {
+        next.delete(path)
+      }
+      return next
+    })
+  }, [])
+
+  const handleSelectAll = () => {
+    if (!browserData) return
+    const allPaths = new Set()
+    const collectPaths = (items) => {
+      items.forEach(item => {
+        allPaths.add(item.path)
+      })
+    }
+    collectPaths([...browserData.folders, ...browserData.files])
+    setSelectedPaths(allPaths)
+  }
+
+  const handleClearSelection = () => {
+    setSelectedPaths(new Set())
   }
 
   return (
@@ -159,7 +284,7 @@ export default function SourceSection({ config, onChange }) {
 
       {/* Project Selection */}
       <div className="form-group">
-        <label className="form-label">GCP Project</label>
+        <label className="form-label">Google Cloud</label>
         <select
           className="tier-select"
           value={config.project?.id || ''}
@@ -167,7 +292,7 @@ export default function SourceSection({ config, onChange }) {
           disabled={loading.projects}
         >
           <option value="">
-            {loading.projects ? 'Loading projects...' : 'Select GCP Project'}
+            {loading.projects ? 'Loading projects...' : 'Select Project'}
           </option>
           {projects.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
@@ -197,7 +322,7 @@ export default function SourceSection({ config, onChange }) {
 
       {/* Dataset Selection */}
       <div className="form-group">
-        <label className="form-label">Dataset (Tier & Year)</label>
+        <label className="form-label">Dataset</label>
         <select
           className="tier-select"
           value={config.dataset?.path || ''}
@@ -209,50 +334,95 @@ export default function SourceSection({ config, onChange }) {
           </option>
           {datasets.map(d => (
             <option key={d.path} value={d.path}>
-              {d.path} ({d.fileCount.toLocaleString()} files, {d.totalSize})
+              {d.path} {d.hasChildren ? '(has subfolders)' : `(${d.fileCount} files)`}
             </option>
           ))}
         </select>
       </div>
 
-      {/* Date Range */}
-      <div className="date-section">
-        <div className="date-group">
-          <span className="date-label">Date Range</span>
-          <div className="date-inputs">
-            <input
-              type="date"
-              className="date-select"
-              value={config.startDate}
-              onChange={(e) => onChange({ ...config, startDate: e.target.value })}
-              disabled={!config.dataset || loading.dates}
-              min={config.dataset?.dateRange?.start}
-              max={config.dataset?.dateRange?.end}
-            />
-            <input
-              type="date"
-              className="date-select"
-              value={config.endDate}
-              onChange={(e) => onChange({ ...config, endDate: e.target.value })}
-              disabled={!config.dataset || loading.dates}
-              min={config.startDate || config.dataset?.dateRange?.start}
-              max={config.dataset?.dateRange?.end}
-              placeholder="Optional"
-            />
+      {/* Collapsible Data Browser */}
+      {config.dataset && (
+        <div className="data-browser-section">
+          <div
+            className="data-browser-header"
+            onClick={() => setDataExpanded(!dataExpanded)}
+          >
+            <span className="collapse-icon">{dataExpanded ? '▼' : '▶'}</span>
+            <span className="data-browser-title">Data Selection</span>
+            {selectedPaths.size > 0 && (
+              <span className="selection-badge">{selectedPaths.size} selected</span>
+            )}
           </div>
+
+          {dataExpanded && (
+            <div className="data-browser-content">
+              {browserLoading ? (
+                <div className="browser-loading">Loading data structure...</div>
+              ) : browserData ? (
+                <>
+                  <div className="browser-actions">
+                    <button
+                      type="button"
+                      className="browser-btn"
+                      onClick={handleSelectAll}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      className="browser-btn"
+                      onClick={handleClearSelection}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="tree-container">
+                    {browserData.folders.length === 0 && browserData.files.length === 0 ? (
+                      <div className="browser-empty">No data found in this dataset</div>
+                    ) : (
+                      <>
+                        {browserData.folders.map(folder => (
+                          <TreeNode
+                            key={folder.path}
+                            node={folder}
+                            level={0}
+                            selectedPaths={selectedPaths}
+                            onToggleSelect={handleToggleSelect}
+                            onExpand={handleExpand}
+                            expandedPaths={expandedPaths}
+                            bucketName={config.bucket.name}
+                          />
+                        ))}
+                        {browserData.files.map(file => (
+                          <TreeNode
+                            key={file.path}
+                            node={file}
+                            level={0}
+                            selectedPaths={selectedPaths}
+                            onToggleSelect={handleToggleSelect}
+                            onExpand={handleExpand}
+                            expandedPaths={expandedPaths}
+                            bucketName={config.bucket.name}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="browser-empty">Select a dataset to browse</div>
+              )}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Selection Summary */}
-      {config.fileCount > 0 && (
+      {selectedPaths.size > 0 && (
         <div className="preset-values">
           <div className="preset-item">
-            <span className="preset-label">Files</span>
-            <span className="preset-value">{config.fileCount.toLocaleString()}</span>
-          </div>
-          <div className="preset-item">
-            <span className="preset-label">Estimated Size</span>
-            <span className="preset-value">{config.totalSize}</span>
+            <span className="preset-label">Selected Items</span>
+            <span className="preset-value">{selectedPaths.size}</span>
           </div>
           <div className="preset-item">
             <span className="preset-label">Status</span>
@@ -261,19 +431,11 @@ export default function SourceSection({ config, onChange }) {
         </div>
       )}
 
-      {config.dataset && config.startDate && config.fileCount === 0 && (
+      {config.dataset && selectedPaths.size === 0 && (
         <div className="batch-warning">
-          No files found for selected date range
+          Select items from the data browser above
         </div>
       )}
     </div>
   )
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }

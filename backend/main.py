@@ -100,7 +100,7 @@ async def list_buckets(project_id: str):
 
 @app.get("/api/gcp/buckets/{bucket_name}/datasets", response_model=DatasetsResponse)
 async def list_datasets(bucket_name: str):
-    """List datasets (tier/year combinations) in a bucket."""
+    """List top-level datasets (prefixes) in a bucket."""
     try:
         datasets = gcp_client.list_datasets(bucket_name)
         return {"datasets": datasets}
@@ -114,6 +114,26 @@ async def list_dates(bucket_name: str, dataset_path: str):
     try:
         dates = gcp_client.list_dates(bucket_name, dataset_path)
         return {"availableDates": dates}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gcp/buckets/{bucket_name}/browse")
+async def browse_bucket_root(bucket_name: str):
+    """Browse the root of a bucket."""
+    try:
+        result = gcp_client.browse_path(bucket_name, "")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gcp/buckets/{bucket_name}/browse/{path:path}")
+async def browse_bucket_path(bucket_name: str, path: str):
+    """Browse a specific path within a bucket."""
+    try:
+        result = gcp_client.browse_path(bucket_name, path)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -167,8 +187,7 @@ async def submit_pipeline(request: PipelineSubmitRequest):
         result = dataflow_runner.submit_pipeline(
             source_bucket=request.sourceBucket,
             source_dataset=request.sourceDataset,
-            start_date=request.startDate,
-            end_date=request.endDate,
+            selected_paths=request.selectedPaths,
             process_type=request.processType.value,
             output_shards=request.outputShards,
             compression=request.compression.value,
@@ -187,8 +206,7 @@ async def submit_pipeline(request: PipelineSubmitRequest):
             "sourceProject": request.sourceProject,
             "sourceBucket": request.sourceBucket,
             "sourceDataset": request.sourceDataset,
-            "startDate": request.startDate,
-            "endDate": request.endDate,
+            "selectedPaths": request.selectedPaths,
             "processType": request.processType.value,
             "outputShards": request.outputShards,
             "compression": request.compression.value,

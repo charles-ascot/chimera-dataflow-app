@@ -992,3 +992,173 @@ body {
     font-size: 11px;
   }
 }
+
+/* DATA BROWSER */
+.data-browser-section {
+  margin-top: 20px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(10, 15, 30, 0.3);
+}
+
+.data-browser-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  background: rgba(0, 212, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+  transition: background 0.2s ease;
+}
+
+.data-browser-header:hover {
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.collapse-icon {
+  font-size: 10px;
+  color: #00D4FF;
+  width: 12px;
+}
+
+.data-browser-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #00D4FF;
+  flex: 1;
+}
+
+.selection-badge {
+  background: rgba(157, 78, 221, 0.3);
+  border: 1px solid rgba(157, 78, 221, 0.5);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #9D4EDD;
+  font-weight: 600;
+}
+
+.data-browser-content {
+  padding: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.data-browser-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.data-browser-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.data-browser-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.3);
+  border-radius: 3px;
+}
+
+.browser-loading {
+  text-align: center;
+  padding: 30px;
+  color: #888;
+  font-size: 13px;
+}
+
+.browser-empty {
+  text-align: center;
+  padding: 30px;
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.browser-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+}
+
+.browser-btn {
+  padding: 6px 12px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 6px;
+  color: #00D4FF;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.browser-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  border-color: #00D4FF;
+}
+
+.tree-container {
+  font-size: 13px;
+}
+
+.tree-node {
+  user-select: none;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.tree-item:hover {
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.tree-item.selected {
+  background: rgba(157, 78, 221, 0.2);
+  border: 1px solid rgba(157, 78, 221, 0.3);
+}
+
+.tree-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #9D4EDD;
+  cursor: pointer;
+}
+
+.tree-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+}
+
+.tree-name {
+  flex: 1;
+  color: #e0e0e0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-meta {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.tree-children {
+  margin-left: 8px;
+  border-left: 1px solid rgba(0, 212, 255, 0.1);
+}

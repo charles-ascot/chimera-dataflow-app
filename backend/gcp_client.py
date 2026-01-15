@@ -79,51 +79,111 @@ class GCPClient:
             return "Unknown"
 
     def list_datasets(self, bucket_name: str) -> List[dict]:
-        """List datasets (tier/year combinations) in a bucket."""
+        """List all top-level prefixes (datasets) in a bucket."""
         datasets = []
         bucket = self.storage_client.bucket(bucket_name)
 
-        # Common patterns for Betfair data organization
-        prefixes_seen = set()
-
         try:
-            # List top-level prefixes (BASIC, ADVANCED, PRO, etc.)
-            for blob in bucket.list_blobs(delimiter="/"):
-                pass  # Just consume iterator
-
+            # List all top-level prefixes in the bucket
             iterator = bucket.list_blobs(delimiter="/")
+            blobs = list(iterator)  # Consume to get prefixes
             prefixes = list(iterator.prefixes)
 
-            for tier_prefix in prefixes:
-                tier = tier_prefix.rstrip("/")
-
-                # List year prefixes under each tier
-                for blob in bucket.list_blobs(prefix=tier_prefix, delimiter="/"):
-                    pass
-
-                year_iterator = bucket.list_blobs(prefix=tier_prefix, delimiter="/")
-                year_prefixes = list(year_iterator.prefixes)
-
-                for year_prefix in year_prefixes:
-                    path = year_prefix.rstrip("/")
-                    if path in prefixes_seen:
-                        continue
-                    prefixes_seen.add(path)
-
-                    # Get stats for this dataset
-                    stats = self._get_dataset_stats(bucket, year_prefix)
-                    if stats["fileCount"] > 0:
-                        datasets.append({
-                            "path": path,
-                            "fileCount": stats["fileCount"],
-                            "totalSize": self._format_bytes(stats["totalBytes"]),
-                            "dateRange": stats["dateRange"],
-                        })
+            for prefix in prefixes:
+                path = prefix.rstrip("/")
+                # Get basic stats for this prefix
+                stats = self._get_prefix_stats(bucket, prefix)
+                datasets.append({
+                    "path": path,
+                    "fileCount": stats["fileCount"],
+                    "totalSize": self._format_bytes(stats["totalBytes"]),
+                    "hasChildren": stats["hasChildren"],
+                })
 
         except Exception as e:
             raise Exception(f"Failed to list datasets: {str(e)}")
 
         return datasets
+
+    def _get_prefix_stats(self, bucket, prefix: str) -> dict:
+        """Get statistics for a prefix (quick scan)."""
+        file_count = 0
+        total_bytes = 0
+        has_children = False
+        max_scan = 100  # Quick scan for preview
+
+        try:
+            # Check for sub-prefixes (children)
+            child_iterator = bucket.list_blobs(prefix=prefix, delimiter="/", max_results=10)
+            child_blobs = list(child_iterator)
+            child_prefixes = list(child_iterator.prefixes)
+            has_children = len(child_prefixes) > 0
+
+            # Count files at this level
+            for blob in child_blobs:
+                if not blob.name.endswith("/"):
+                    file_count += 1
+                    total_bytes += blob.size or 0
+
+            return {
+                "fileCount": file_count,
+                "totalBytes": total_bytes,
+                "hasChildren": has_children,
+            }
+        except Exception:
+            return {"fileCount": 0, "totalBytes": 0, "hasChildren": False}
+
+    def browse_path(self, bucket_name: str, path: str = "") -> dict:
+        """Browse a path in a bucket and return its children (folders and files)."""
+        bucket = self.storage_client.bucket(bucket_name)
+        prefix = f"{path}/" if path and not path.endswith("/") else path
+
+        folders = []
+        files = []
+
+        try:
+            iterator = bucket.list_blobs(prefix=prefix, delimiter="/")
+            blobs = list(iterator)
+            prefixes = list(iterator.prefixes)
+
+            # Process folders (sub-prefixes)
+            for sub_prefix in prefixes:
+                folder_name = sub_prefix.rstrip("/").split("/")[-1]
+                folder_path = sub_prefix.rstrip("/")
+                stats = self._get_prefix_stats(bucket, sub_prefix)
+                folders.append({
+                    "name": folder_name,
+                    "path": folder_path,
+                    "type": "folder",
+                    "hasChildren": stats["hasChildren"],
+                    "fileCount": stats["fileCount"],
+                    "totalSize": self._format_bytes(stats["totalBytes"]),
+                })
+
+            # Process files at this level
+            for blob in blobs:
+                if blob.name.endswith("/"):
+                    continue
+                file_name = blob.name.split("/")[-1]
+                files.append({
+                    "name": file_name,
+                    "path": blob.name,
+                    "type": "file",
+                    "size": self._format_bytes(blob.size or 0),
+                    "sizeBytes": blob.size or 0,
+                    "updated": blob.updated.isoformat() if blob.updated else None,
+                })
+
+            return {
+                "path": path,
+                "folders": folders,
+                "files": files,
+                "totalFolders": len(folders),
+                "totalFiles": len(files),
+            }
+
+        except Exception as e:
+            raise Exception(f"Failed to browse path: {str(e)}")
 
     def _get_dataset_stats(self, bucket, prefix: str) -> dict:
         """Get statistics for a dataset prefix."""
