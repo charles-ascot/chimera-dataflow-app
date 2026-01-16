@@ -116,9 +116,9 @@ class DataflowRunner:
                 worker_options.num_workers = num_workers
                 worker_options.max_num_workers = num_workers
 
-            # Setup options
+            # Setup options - save_main_session must be False to avoid pickling GCP clients
             setup_options = options.view_as(SetupOptions)
-            setup_options.save_main_session = True
+            setup_options.save_main_session = False
 
             # Create the input pattern (combine all patterns with comma)
             # For multiple patterns, we'll use MatchFiles with each pattern
