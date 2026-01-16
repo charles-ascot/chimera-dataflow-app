@@ -1,7 +1,6 @@
 """CHIMERA DataFlow API - FastAPI backend for Betfair data transport."""
 
 import os
-import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -171,8 +170,6 @@ async def create_bucket(request: CreateBucketRequest):
 @app.post("/api/pipeline/submit", response_model=PipelineSubmitResponse)
 async def submit_pipeline(request: PipelineSubmitRequest):
     """Submit a new Dataflow pipeline job."""
-    job_id = f"{datetime.utcnow().strftime('%Y-%m-%d')}-{uuid.uuid4().hex[:8]}"
-
     try:
         # Create new bucket if requested
         if request.createNewBucket:
