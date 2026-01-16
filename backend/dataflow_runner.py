@@ -72,7 +72,7 @@ class DataflowRunner:
 
         # Get the directory where this file is located for setup_file path
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        setup_file = os.path.join(current_dir, 'pipeline_setup.py')
+        setup_file = os.path.join(current_dir, 'setup.py')
 
         try:
             # Configure pipeline options for Dataflow
