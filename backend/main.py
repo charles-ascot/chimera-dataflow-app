@@ -295,11 +295,17 @@ async def cancel_job(job_id: str):
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
+        # Try to cancel the Dataflow job if it exists
         if job.get("dataflowJobId"):
-            dataflow_runner.cancel_job(
-                job["dataflowJobId"],
-                job.get("dataflowRegion", "europe-west2")
-            )
+            try:
+                dataflow_runner.cancel_job(
+                    job["dataflowJobId"],
+                    job.get("dataflowRegion", "europe-west2")
+                )
+            except Exception as df_error:
+                # Log the error but continue - the job may not exist in Dataflow
+                # (e.g., if it was a stub job or already completed)
+                print(f"Could not cancel Dataflow job: {df_error}")
 
         firestore_client.update_job(job_id, {"status": "cancelled"})
         return {"cancelled": True}

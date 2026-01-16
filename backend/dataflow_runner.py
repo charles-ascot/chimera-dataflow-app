@@ -2,10 +2,42 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from google.auth import default
 from google.cloud import dataflow_v1beta3
-from google.cloud.dataflow_v1beta3 import FlexTemplateRuntimeEnvironment
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import (
+    PipelineOptions,
+    StandardOptions,
+    GoogleCloudOptions,
+    WorkerOptions,
+    SetupOptions,
+)
+from apache_beam.io import fileio
+
+
+class DecompressBz2(beam.DoFn):
+    """Decompress bz2 files and yield lines."""
+
+    def process(self, readable_file):
+        import bz2
+
+        file_path = readable_file.metadata.path
+        try:
+            with readable_file.open() as f:
+                compressed_content = f.read()
+
+            decompressed = bz2.decompress(compressed_content)
+
+            # Split into lines (NDJSON format)
+            for line in decompressed.decode('utf-8').strip().split('\n'):
+                if line.strip():
+                    yield line
+        except Exception as e:
+            # Log error but continue processing other files
+            import logging
+            logging.error(f"Error processing {file_path}: {str(e)}")
 
 
 class DataflowRunner:
@@ -25,7 +57,7 @@ class DataflowRunner:
         self,
         source_bucket: str,
         source_dataset: str,
-        selected_paths: list,
+        selected_paths: List[str],
         process_type: str,
         output_shards: int,
         compression: str,
@@ -39,77 +71,130 @@ class DataflowRunner:
         """Submit a Dataflow pipeline job."""
 
         job_id = f"{datetime.utcnow().strftime('%Y-%m-%d')}-{uuid.uuid4().hex[:8]}"
+        job_name = f"chimera-{job_id}"
 
         # Build input patterns from selected paths
         input_patterns = []
         for path in selected_paths:
             # Each path can be a folder or file
             if path.endswith('/'):
-                input_patterns.append(f"gs://{source_bucket}/{path}**/*")
+                input_patterns.append(f"gs://{source_bucket}/{path}**/*.bz2")
             else:
                 # Check if it looks like a file or folder
-                input_patterns.append(f"gs://{source_bucket}/{path}/**/*")
+                input_patterns.append(f"gs://{source_bucket}/{path}/**/*.bz2")
                 input_patterns.append(f"gs://{source_bucket}/{path}")
 
         # Build output path
-        output_path = f"gs://{target_bucket}/{output_prefix}/"
+        output_path = f"gs://{target_bucket}/{output_prefix}/output"
+        temp_location = f"gs://{target_bucket}/temp/{job_id}/"
 
         # Determine number of workers
         num_workers = None
         if max_workers != "AUTO":
             num_workers = int(max_workers)
 
-        # Pipeline parameters
-        pipeline_params = {
-            "input_patterns": input_patterns,
-            "output_path": output_path,
-            "output_shards": str(output_shards),
-            "compression": compression,
-            "process_type": process_type,
-            "selected_paths": selected_paths,
-        }
-
         try:
-            # Create the Dataflow job using the Jobs API directly
-            # This creates a simple batch job that reads, decompresses, and writes
+            # Configure pipeline options for Dataflow
+            options = PipelineOptions()
 
-            job_name = f"chimera-dataflow-{job_id}"
+            # Standard options
+            standard_options = options.view_as(StandardOptions)
+            standard_options.runner = 'DataflowRunner'
 
-            # For a real implementation, you would use a Flex Template or
-            # submit an Apache Beam pipeline. Here we'll create a job spec
-            # that can be submitted.
+            # Google Cloud options
+            google_cloud_options = options.view_as(GoogleCloudOptions)
+            google_cloud_options.project = self.project_id
+            google_cloud_options.region = region
+            google_cloud_options.temp_location = temp_location
+            google_cloud_options.job_name = job_name
+            google_cloud_options.staging_location = f"gs://{target_bucket}/staging/{job_id}/"
 
-            runtime_env = {
-                "machineType": worker_type,
-                "tempLocation": f"gs://{target_bucket}/temp/{job_id}/",
-            }
-
+            # Worker options
+            worker_options = options.view_as(WorkerOptions)
+            worker_options.machine_type = worker_type
             if num_workers:
-                runtime_env["numWorkers"] = num_workers
-                runtime_env["maxWorkers"] = num_workers
+                worker_options.num_workers = num_workers
+                worker_options.max_num_workers = num_workers
 
-            # Note: In production, you would either:
-            # 1. Use a pre-built Flex Template
-            # 2. Submit an Apache Beam pipeline programmatically
-            # 3. Use Cloud Run Jobs for simpler processing
+            # Setup options
+            setup_options = options.view_as(SetupOptions)
+            setup_options.save_main_session = True
 
-            # For now, we return the job configuration that would be submitted
-            dataflow_job_id = f"{datetime.utcnow().strftime('%Y-%m-%d')}_{uuid.uuid4().hex[:8]}"
+            # Create the input pattern (combine all patterns with comma)
+            # For multiple patterns, we'll use MatchFiles with each pattern
+            combined_pattern = input_patterns[0] if len(input_patterns) == 1 else input_patterns
+
+            # Create and run the pipeline
+            p = beam.Pipeline(options=options)
+
+            if isinstance(combined_pattern, list):
+                # Multiple patterns - create a PCollection for each and flatten
+                collections = []
+                for i, pattern in enumerate(combined_pattern):
+                    collection = (
+                        p
+                        | f'MatchFiles_{i}' >> fileio.MatchFiles(pattern)
+                        | f'ReadMatches_{i}' >> fileio.ReadMatches()
+                        | f'Decompress_{i}' >> beam.ParDo(DecompressBz2())
+                    )
+                    collections.append(collection)
+
+                lines = collections | 'Flatten' >> beam.Flatten()
+            else:
+                # Single pattern
+                lines = (
+                    p
+                    | 'MatchFiles' >> fileio.MatchFiles(combined_pattern)
+                    | 'ReadMatches' >> fileio.ReadMatches()
+                    | 'Decompress' >> beam.ParDo(DecompressBz2())
+                )
+
+            # Write output
+            _ = (
+                lines
+                | 'WriteOutput' >> beam.io.WriteToText(
+                    output_path,
+                    file_name_suffix='.ndjson',
+                    num_shards=output_shards,
+                )
+            )
+
+            # Run the pipeline (this submits to Dataflow and returns immediately)
+            result = p.run()
+
+            # Get the Dataflow job ID from the result
+            # The job ID is available in the runner's job reference
+            dataflow_job_id = None
+            if hasattr(result, '_job') and result._job:
+                dataflow_job_id = result._job.id
+            elif hasattr(result, 'job_id'):
+                dataflow_job_id = result.job_id
+            else:
+                # Try to extract from the result object
+                try:
+                    dataflow_job_id = result._job_id
+                except:
+                    # Generate a placeholder - the actual job might still be starting
+                    dataflow_job_id = job_name
+
+            dataflow_url = (
+                f"https://console.cloud.google.com/dataflow/jobs/"
+                f"{region}/{dataflow_job_id}?project={self.project_id}"
+            )
 
             return {
                 "jobId": job_id,
                 "dataflowJobId": dataflow_job_id,
                 "status": "submitted",
                 "message": "Job submitted to Dataflow",
-                "dataflowUrl": (
-                    f"https://console.cloud.google.com/dataflow/jobs/"
-                    f"{region}/{dataflow_job_id}?project={self.project_id}"
-                ),
+                "dataflowUrl": dataflow_url,
                 "config": {
                     "inputPatterns": input_patterns,
                     "outputPath": output_path,
-                    "pipelineParams": pipeline_params,
-                    "runtimeEnv": runtime_env,
+                    "tempLocation": temp_location,
+                    "region": region,
+                    "workerType": worker_type,
+                    "maxWorkers": max_workers,
                 },
             }
 
@@ -168,63 +253,3 @@ class DataflowRunner:
 
         except Exception as e:
             raise Exception(f"Failed to cancel job: {str(e)}")
-
-
-def create_beam_pipeline_code(config: dict) -> str:
-    """
-    Generate Apache Beam pipeline code for the data transport job.
-    This can be used to create a Flex Template or run directly.
-    """
-    return f'''
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.filesystems import FileSystems
-import bz2
-import json
-
-
-class DecompressBz2(beam.DoFn):
-    """Decompress bz2 files."""
-
-    def process(self, element):
-        file_path, file_content = element
-        try:
-            decompressed = bz2.decompress(file_content)
-            # Split into lines (NDJSON)
-            for line in decompressed.decode('utf-8').strip().split('\\n'):
-                if line:
-                    yield line
-        except Exception as e:
-            # Log error but continue
-            pass
-
-
-def run_pipeline():
-    """Run the data transport pipeline."""
-    options = PipelineOptions([
-        '--runner=DataflowRunner',
-        '--project={config.get("project_id", "")}',
-        '--region={config.get("region", "europe-west2")}',
-        '--temp_location={config.get("temp_location", "")}',
-        '--job_name={config.get("job_name", "chimera-dataflow")}',
-        '--machine_type={config.get("worker_type", "n1-standard-4")}',
-    ])
-
-    with beam.Pipeline(options=options) as p:
-        (
-            p
-            | 'MatchFiles' >> beam.io.fileio.MatchFiles('{config.get("input_pattern", "")}')
-            | 'ReadMatches' >> beam.io.fileio.ReadMatches()
-            | 'ReadContents' >> beam.Map(lambda x: (x.metadata.path, x.read()))
-            | 'Decompress' >> beam.ParDo(DecompressBz2())
-            | 'WriteOutput' >> beam.io.WriteToText(
-                '{config.get("output_path", "")}',
-                file_name_suffix='.ndjson',
-                num_shards={config.get("output_shards", 10)},
-            )
-        )
-
-
-if __name__ == '__main__':
-    run_pipeline()
-'''
