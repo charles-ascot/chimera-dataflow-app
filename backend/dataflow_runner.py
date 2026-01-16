@@ -1,8 +1,9 @@
 """Dataflow pipeline runner for data transport jobs."""
 
+import os
 import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import List
 from google.auth import default
 from google.cloud import dataflow_v1beta3
 
@@ -14,30 +15,9 @@ from apache_beam.options.pipeline_options import (
     WorkerOptions,
     SetupOptions,
 )
-from apache_beam.io import fileio
 
-
-class DecompressBz2(beam.DoFn):
-    """Decompress bz2 files and yield lines."""
-
-    def process(self, readable_file):
-        import bz2
-
-        file_path = readable_file.metadata.path
-        try:
-            with readable_file.open() as f:
-                compressed_content = f.read()
-
-            decompressed = bz2.decompress(compressed_content)
-
-            # Split into lines (NDJSON format)
-            for line in decompressed.decode('utf-8').strip().split('\n'):
-                if line.strip():
-                    yield line
-        except Exception as e:
-            # Log error but continue processing other files
-            import logging
-            logging.error(f"Error processing {file_path}: {str(e)}")
+# Import the pipeline module - this will be staged to workers via setup_file
+from beam_pipeline import create_pipeline
 
 
 class DataflowRunner:
@@ -46,9 +26,6 @@ class DataflowRunner:
     def __init__(self, project_id: str = None):
         self.credentials, default_project = default()
         self.project_id = project_id or default_project
-        self.client = dataflow_v1beta3.FlexTemplatesServiceClient(
-            credentials=self.credentials
-        )
         self.jobs_client = dataflow_v1beta3.JobsV1Beta3Client(
             credentials=self.credentials
         )
@@ -93,6 +70,10 @@ class DataflowRunner:
         if max_workers != "AUTO":
             num_workers = int(max_workers)
 
+        # Get the directory where this file is located for setup_file path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        setup_file = os.path.join(current_dir, 'pipeline_setup.py')
+
         try:
             # Configure pipeline options for Dataflow
             options = PipelineOptions()
@@ -116,54 +97,21 @@ class DataflowRunner:
                 worker_options.num_workers = num_workers
                 worker_options.max_num_workers = num_workers
 
-            # Setup options - save_main_session must be False to avoid pickling GCP clients
+            # Setup options - use setup_file to stage the beam_pipeline module
             setup_options = options.view_as(SetupOptions)
             setup_options.save_main_session = False
-
-            # Create the input pattern (combine all patterns with comma)
-            # For multiple patterns, we'll use MatchFiles with each pattern
-            combined_pattern = input_patterns[0] if len(input_patterns) == 1 else input_patterns
+            setup_options.setup_file = setup_file
 
             # Create and run the pipeline
             p = beam.Pipeline(options=options)
 
-            if isinstance(combined_pattern, list):
-                # Multiple patterns - create a PCollection for each and flatten
-                collections = []
-                for i, pattern in enumerate(combined_pattern):
-                    collection = (
-                        p
-                        | f'MatchFiles_{i}' >> fileio.MatchFiles(pattern)
-                        | f'ReadMatches_{i}' >> fileio.ReadMatches()
-                        | f'Decompress_{i}' >> beam.ParDo(DecompressBz2())
-                    )
-                    collections.append(collection)
-
-                lines = collections | 'Flatten' >> beam.Flatten()
-            else:
-                # Single pattern
-                lines = (
-                    p
-                    | 'MatchFiles' >> fileio.MatchFiles(combined_pattern)
-                    | 'ReadMatches' >> fileio.ReadMatches()
-                    | 'Decompress' >> beam.ParDo(DecompressBz2())
-                )
-
-            # Write output
-            _ = (
-                lines
-                | 'WriteOutput' >> beam.io.WriteToText(
-                    output_path,
-                    file_name_suffix='.ndjson',
-                    num_shards=output_shards,
-                )
-            )
+            # Use the create_pipeline function from beam_pipeline module
+            create_pipeline(p, input_patterns, output_path, output_shards)
 
             # Run the pipeline (this submits to Dataflow and returns immediately)
             result = p.run()
 
             # Get the Dataflow job ID from the result
-            # The job ID is available in the runner's job reference
             dataflow_job_id = None
             if hasattr(result, '_job') and result._job:
                 dataflow_job_id = result._job.id
