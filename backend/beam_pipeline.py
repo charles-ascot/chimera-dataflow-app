@@ -117,6 +117,7 @@ def create_pipeline(pipeline, input_patterns, output_path, output_shards):
         pipeline
         | 'CreatePatterns' >> beam.Create(input_patterns)
         | 'ListFiles' >> beam.ParDo(ListGCSFiles())
+        | 'Deduplicate' >> beam.Distinct()  # Remove duplicate file paths from overlapping patterns
         | 'Reshuffle' >> beam.Reshuffle()  # Distribute files across workers
         | 'ReadAndDecompress' >> beam.ParDo(ReadAndDecompressGCSFile())
     )
