@@ -1,164 +1,126 @@
 """Apache Beam pipeline for data transport jobs.
 
-This module is separate from the main backend to avoid serialization issues
-with Dataflow workers. The DoFn classes defined here will be properly
-pickled and sent to workers.
+This module uses direct GCS access instead of fileio to avoid
+issues with file matching on Dataflow workers.
 
 Critical: This file is staged to workers via setup.py
 """
 
 import apache_beam as beam
-from apache_beam.io import fileio
 from apache_beam.metrics import Metrics
 
 
-class DecompressBz2Fn(beam.DoFn):
-    """Decompress bz2 files and yield lines.
-    
-    Includes comprehensive logging and metrics for debugging.
-    """
-    
+class ReadAndDecompressGCSFile(beam.DoFn):
+    """Read file directly from GCS and decompress - bypasses fileio."""
+
     def __init__(self):
-        # Initialize metric counters
         self.files_processed = Metrics.counter(self.__class__, 'files_processed')
         self.files_failed = Metrics.counter(self.__class__, 'files_failed')
         self.bytes_read = Metrics.counter(self.__class__, 'bytes_read')
-        self.bytes_decompressed = Metrics.counter(self.__class__, 'bytes_decompressed')
         self.lines_yielded = Metrics.counter(self.__class__, 'lines_yielded')
-    
-    def process(self, readable_file):
+
+    def setup(self):
+        """Called once per worker - initialize GCS client."""
+        from google.cloud import storage
+        self.client = storage.Client()
+
+    def process(self, gcs_path):
+        """Download and decompress a single GCS file."""
         import bz2
         import logging
 
-        file_path = readable_file.metadata.path
-        logging.info(f"[DecompressBz2Fn] Starting to process: {file_path}")
+        logging.info(f"Processing: {gcs_path}")
 
         try:
-            # Read compressed content
-            with readable_file.open() as f:
-                compressed_content = f.read()
+            # Parse gs://bucket/path
+            path = gcs_path.replace("gs://", "")
+            bucket_name = path.split("/")[0]
+            blob_path = "/".join(path.split("/")[1:])
 
-            compressed_size = len(compressed_content)
-            self.bytes_read.inc(compressed_size)
-            logging.info(f"[DecompressBz2Fn] Read {compressed_size} compressed bytes from {file_path}")
+            # Download
+            bucket = self.client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+            compressed_data = blob.download_as_bytes()
 
-            # Decompress - handle both single and multi-stream bz2 files
-            try:
-                # Try single-stream first (most common)
-                decompressed = bz2.decompress(compressed_content)
-            except Exception as e1:
-                logging.warning(f"[DecompressBz2Fn] Single-stream decompress failed, trying multi-stream: {e1}")
-                # Handle multi-stream bz2 files
-                decompressor = bz2.BZ2Decompressor()
-                decompressed = b''
-                data = compressed_content
-                while data:
-                    try:
-                        decompressed += decompressor.decompress(data)
-                        if decompressor.eof:
-                            data = decompressor.unused_data
-                            if data:
-                                decompressor = bz2.BZ2Decompressor()
-                            else:
-                                break
-                        else:
-                            break
-                    except Exception as e2:
-                        logging.error(f"[DecompressBz2Fn] Multi-stream decompress failed: {e2}")
-                        raise
+            self.bytes_read.inc(len(compressed_data))
+            logging.info(f"Downloaded {len(compressed_data)} bytes from {gcs_path}")
 
-            decompressed_size = len(decompressed)
-            self.bytes_decompressed.inc(decompressed_size)
-            logging.info(f"[DecompressBz2Fn] Decompressed to {decompressed_size} bytes")
+            # Decompress
+            decompressed = bz2.decompress(compressed_data)
 
-            if decompressed_size == 0:
-                logging.warning(f"[DecompressBz2Fn] Decompressed content is empty for {file_path}")
-                self.files_failed.inc()
-                return
-
-            # Split into lines (NDJSON format)
+            # Yield lines
             line_count = 0
-            content = decompressed.decode('utf-8', errors='replace').strip()
-            for line in content.split('\n'):
-                stripped_line = line.strip()
-                if stripped_line:
+            for line in decompressed.decode('utf-8').strip().split('\n'):
+                if line.strip():
                     line_count += 1
                     self.lines_yielded.inc()
-                    yield stripped_line
+                    yield line
 
             self.files_processed.inc()
-            logging.info(f"[DecompressBz2Fn] Yielded {line_count} lines from {file_path}")
+            logging.info(f"Yielded {line_count} lines from {gcs_path}")
 
         except Exception as e:
             import traceback
             self.files_failed.inc()
-            logging.error(f"[DecompressBz2Fn] Error processing {file_path}: {str(e)}")
+            logging.error(f"Error processing {gcs_path}: {e}")
             logging.error(traceback.format_exc())
-            # Re-raise to make failures visible
-            raise
 
 
-class LogMatchedFilesFn(beam.DoFn):
-    """Log matched files for debugging."""
-    
-    def __init__(self):
-        self.files_matched = Metrics.counter(self.__class__, 'files_matched')
-    
-    def process(self, file_metadata):
+class ListGCSFiles(beam.DoFn):
+    """List all .bz2 files matching a pattern."""
+
+    def setup(self):
+        from google.cloud import storage
+        self.client = storage.Client()
+
+    def process(self, pattern):
+        """Convert a pattern like gs://bucket/path/**/*.bz2 into actual file paths."""
         import logging
-        self.files_matched.inc()
-        logging.info(f"[MatchFiles] Found file: {file_metadata.path} ({file_metadata.size_in_bytes} bytes)")
-        yield file_metadata
+
+        logging.info(f"Listing files for pattern: {pattern}")
+
+        # Parse pattern
+        path = pattern.replace("gs://", "")
+        bucket_name = path.split("/")[0]
+        prefix = "/".join(path.split("/")[1:])
+
+        # Remove glob parts to get prefix for listing
+        if "**" in prefix:
+            prefix = prefix.split("**")[0]
+        if "*" in prefix:
+            prefix = prefix.split("*")[0]
+        prefix = prefix.rstrip("/")
+
+        logging.info(f"Listing bucket={bucket_name}, prefix={prefix}")
+
+        bucket = self.client.bucket(bucket_name)
+        file_count = 0
+
+        for blob in bucket.list_blobs(prefix=prefix):
+            if blob.name.endswith('.bz2'):
+                file_count += 1
+                gcs_path = f"gs://{bucket_name}/{blob.name}"
+                logging.info(f"Found file: {gcs_path}")
+                yield gcs_path
+
+        logging.info(f"Listed {file_count} files for pattern {pattern}")
 
 
 def create_pipeline(pipeline, input_patterns, output_path, output_shards):
-    """Create the Beam pipeline transforms.
-    
-    Args:
-        pipeline: Apache Beam Pipeline object
-        input_patterns: List of GCS patterns to match files
-        output_path: GCS output path prefix
-        output_shards: Number of output shards
-        
-    Returns:
-        The pipeline with transforms applied
-    """
+    """Create the Beam pipeline using direct GCS access."""
     import logging
-    
-    logging.info(f"[Pipeline] Creating pipeline with {len(input_patterns)} pattern(s)")
-    for i, pattern in enumerate(input_patterns):
-        logging.info(f"[Pipeline] Pattern {i}: {pattern}")
-    
-    logging.info(f"[Pipeline] Output path: {output_path}")
-    logging.info(f"[Pipeline] Output shards: {output_shards}")
-    
-    if isinstance(input_patterns, list) and len(input_patterns) > 1:
-        # Multiple patterns - create a PCollection for each and flatten
-        collections = []
-        for i, pattern in enumerate(input_patterns):
-            logging.info(f"[Pipeline] Setting up collection for pattern {i}: {pattern}")
-            collection = (
-                pipeline
-                | f'MatchFiles_{i}' >> fileio.MatchFiles(pattern)
-                | f'LogMatched_{i}' >> beam.ParDo(LogMatchedFilesFn())
-                | f'ReadMatches_{i}' >> fileio.ReadMatches()
-                | f'Decompress_{i}' >> beam.ParDo(DecompressBz2Fn())
-            )
-            collections.append(collection)
-        
-        lines = collections | 'Flatten' >> beam.Flatten()
-    else:
-        # Single pattern
-        pattern = input_patterns[0] if isinstance(input_patterns, list) else input_patterns
-        logging.info(f"[Pipeline] Setting up single pattern: {pattern}")
-        lines = (
-            pipeline
-            | 'MatchFiles' >> fileio.MatchFiles(pattern)
-            | 'LogMatched' >> beam.ParDo(LogMatchedFilesFn())
-            | 'ReadMatches' >> fileio.ReadMatches()
-            | 'Decompress' >> beam.ParDo(DecompressBz2Fn())
-        )
-    
+
+    logging.info(f"Creating pipeline with {len(input_patterns)} pattern(s)")
+
+    # Convert patterns to actual file paths, then process each file
+    lines = (
+        pipeline
+        | 'CreatePatterns' >> beam.Create(input_patterns)
+        | 'ListFiles' >> beam.ParDo(ListGCSFiles())
+        | 'Reshuffle' >> beam.Reshuffle()  # Distribute files across workers
+        | 'ReadAndDecompress' >> beam.ParDo(ReadAndDecompressGCSFile())
+    )
+
     # Write output
     _ = (
         lines
@@ -168,6 +130,5 @@ def create_pipeline(pipeline, input_patterns, output_path, output_shards):
             num_shards=output_shards,
         )
     )
-    
-    logging.info("[Pipeline] Pipeline transforms created successfully")
+
     return pipeline
