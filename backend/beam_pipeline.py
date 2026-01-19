@@ -29,42 +29,73 @@ class DecompressBz2Fn(beam.DoFn):
     def process(self, readable_file):
         import bz2
         import logging
-        
+
         file_path = readable_file.metadata.path
         logging.info(f"[DecompressBz2Fn] Starting to process: {file_path}")
-        
+
         try:
             # Read compressed content
             with readable_file.open() as f:
                 compressed_content = f.read()
-            
+
             compressed_size = len(compressed_content)
             self.bytes_read.inc(compressed_size)
             logging.info(f"[DecompressBz2Fn] Read {compressed_size} compressed bytes from {file_path}")
-            
-            # Decompress
-            decompressed = bz2.decompress(compressed_content)
+
+            # Decompress - handle both single and multi-stream bz2 files
+            try:
+                # Try single-stream first (most common)
+                decompressed = bz2.decompress(compressed_content)
+            except Exception as e1:
+                logging.warning(f"[DecompressBz2Fn] Single-stream decompress failed, trying multi-stream: {e1}")
+                # Handle multi-stream bz2 files
+                decompressor = bz2.BZ2Decompressor()
+                decompressed = b''
+                data = compressed_content
+                while data:
+                    try:
+                        decompressed += decompressor.decompress(data)
+                        if decompressor.eof:
+                            data = decompressor.unused_data
+                            if data:
+                                decompressor = bz2.BZ2Decompressor()
+                            else:
+                                break
+                        else:
+                            break
+                    except Exception as e2:
+                        logging.error(f"[DecompressBz2Fn] Multi-stream decompress failed: {e2}")
+                        raise
+
             decompressed_size = len(decompressed)
             self.bytes_decompressed.inc(decompressed_size)
             logging.info(f"[DecompressBz2Fn] Decompressed to {decompressed_size} bytes")
-            
+
+            if decompressed_size == 0:
+                logging.warning(f"[DecompressBz2Fn] Decompressed content is empty for {file_path}")
+                self.files_failed.inc()
+                return
+
             # Split into lines (NDJSON format)
             line_count = 0
-            for line in decompressed.decode('utf-8').strip().split('\n'):
+            content = decompressed.decode('utf-8', errors='replace').strip()
+            for line in content.split('\n'):
                 stripped_line = line.strip()
                 if stripped_line:
                     line_count += 1
                     self.lines_yielded.inc()
                     yield stripped_line
-            
+
             self.files_processed.inc()
             logging.info(f"[DecompressBz2Fn] Yielded {line_count} lines from {file_path}")
-            
+
         except Exception as e:
             import traceback
             self.files_failed.inc()
             logging.error(f"[DecompressBz2Fn] Error processing {file_path}: {str(e)}")
             logging.error(traceback.format_exc())
+            # Re-raise to make failures visible
+            raise
 
 
 class LogMatchedFilesFn(beam.DoFn):
