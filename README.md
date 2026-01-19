@@ -1,131 +1,117 @@
 # CHIMERA DataFlow v2.0
 
-Data transport pipeline application for reading compressed data files from Google Cloud Storage buckets, decompressing them, and writing output to target buckets.
+Data transport pipeline for processing compressed Betfair data files from Google Cloud Storage. Reads bz2-compressed NDJSON files, decompresses and concatenates them, then writes output shards to target buckets for downstream analysis.
 
-## Features
+## Overview
 
-- **Plugin Architecture**: Supports multiple data source providers
-  - Betfair (default) - bz2 compressed NDJSON files
-  - The Racing API (coming soon)
-  - Custom/Other (coming soon)
-  
-- **Improved Reliability**
-  - Pattern validation before pipeline submission
-  - File count verification
-  - Comprehensive metrics and logging
-  - Proper module staging for Dataflow workers
+CHIMERA DataFlow is part of the CHIMERA data pipeline:
 
-- **Modern Stack**
-  - Backend: Python 3.11+, FastAPI, Apache Beam
-  - Frontend: React (Vite), vanilla CSS
-  - Backend Hosting: Google Cloud Run
-  - Frontend Hosting: Cloudflare Pages
-  - Database: Firestore (job tracking)
-  - Storage: Google Cloud Storage
+```
+Source Data (GCS)     CHIMERA DataFlow      CHIMERA Analysis      BigQuery
+   .bz2 files    -->  decompress/concat -->    analyze       -->   tables
+```
+
+### Key Features
+
+- **Plugin Architecture** - Extensible support for multiple data sources
+- **Direct GCS Access** - Bypasses Beam fileio for reliable Dataflow execution
+- **Pattern Validation** - Validates file patterns before pipeline submission
+- **Deduplication** - Prevents processing the same file twice
+- **Job Tracking** - Firestore-backed job history and status monitoring
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CHIMERA DataFlow v2.0                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │   Frontend   │───▶│   Backend    │───▶│  Dataflow    │  │
-│  │  (React/CF)  │    │ (FastAPI/CR) │    │  Pipeline    │  │
-│  └──────────────┘    └──────────────┘    └──────────────┘  │
-│                             │                    │          │
-│                             ▼                    ▼          │
-│                      ┌──────────────┐    ┌──────────────┐  │
-│                      │  Firestore   │    │     GCS      │  │
-│                      │  (Jobs DB)   │    │   Buckets    │  │
-│                      └──────────────┘    └──────────────┘  │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+Frontend (React/Vite)          Backend (FastAPI)           Dataflow
+   Cloudflare Pages      -->     Cloud Run         -->    GCP Dataflow
+        |                           |                         |
+        |                      Firestore                     GCS
+        |                     (job tracking)            (input/output)
+        v                           v                         v
+   User selects files     API validates & submits      Workers process
+   and configures job      pipeline to Dataflow        files in parallel
 ```
 
-## Configuration
+## Quick Start
 
-### GCP Settings
+### Prerequisites
 
-| Setting | Value |
-|---------|-------|
-| Project ID | betfair-data-explorer |
-| Cloud Run Region | europe-west2 |
-| Dataflow Region | europe-west2 |
-| Service Name | chimera-dataflow-api |
+- Python 3.11+
+- Node.js 20+
+- Google Cloud SDK with `gcloud` authenticated
+- Access to `betfair-data-explorer` GCP project
 
-### Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/api/plugins` | GET | List available source plugins |
-| `/api/plugins/validate` | POST | Validate file patterns |
-| `/api/gcp/projects` | GET | List GCP projects |
-| `/api/gcp/projects/{id}/buckets` | GET | List buckets |
-| `/api/gcp/buckets/{name}/browse/{path?}` | GET | Browse bucket contents |
-| `/api/pipeline/submit` | POST | Submit pipeline job |
-| `/api/pipeline/{job_id}/status` | GET | Get job status |
-| `/api/pipeline/{job_id}/cancel` | POST | Cancel job |
-| `/api/pipeline/history` | GET | List past jobs |
-
-## Development
-
-### Backend
+### Run Locally
 
 ```bash
+# Backend
 cd backend
 pip install -r requirements.txt
 python main.py
-```
 
-### Frontend
-
-```bash
+# Frontend (separate terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-## Deployment
+## Documentation
 
-### Backend (Cloud Run)
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | System design, data flow, components |
+| [API Reference](docs/API.md) | REST endpoints, request/response formats |
+| [Deployment](docs/DEPLOYMENT.md) | Cloud Run + Cloudflare Pages deployment |
+| [Development](docs/DEVELOPMENT.md) | Local setup, testing, debugging |
+| [Plugins](docs/PLUGINS.md) | Plugin system and creating new sources |
 
-Automatically deployed via GitHub Actions when changes are pushed to `backend/**`.
+## URLs
 
-### Frontend (Cloudflare Pages)
+| Environment | URL |
+|-------------|-----|
+| Frontend | https://dataflow.thync.online |
+| Frontend Alt | https://chimera-dataflow-app.pages.dev |
+| API | https://chimera-dataflow-app-xxxxx.run.app |
+| GitHub | https://github.com/charles-ascot/chimera-dataflow-app |
 
-Automatically deployed via GitHub Actions when changes are pushed to `frontend/**`.
+## Project Structure
 
-## Testing
-
-### Validate Pattern Matching
-
-```bash
-# Test that patterns match actual files
-gsutil ls "gs://your-bucket/ADVANCED/2016/**/*.bz2" | head -10
+```
+chimera-dataflow-app/
+├── backend/
+│   ├── main.py              # FastAPI application
+│   ├── beam_pipeline.py     # Apache Beam pipeline definition
+│   ├── dataflow_runner.py   # Dataflow job submission
+│   ├── gcp_client.py        # GCS/GCP operations
+│   ├── firestore_client.py  # Job persistence
+│   ├── models.py            # Pydantic models
+│   ├── plugins/             # Source plugins
+│   │   ├── base.py          # Plugin base class
+│   │   ├── betfair.py       # Betfair data source
+│   │   └── racing_api.py    # Racing API (coming soon)
+│   ├── setup.py             # Dataflow worker module staging
+│   ├── requirements.txt     # Python dependencies
+│   └── Dockerfile           # Cloud Run container
+├── frontend/
+│   ├── src/                 # React components
+│   ├── package.json         # Node dependencies
+│   └── vite.config.ts       # Vite configuration
+├── .github/workflows/       # CI/CD pipelines
+│   ├── deploy-backend.yml   # Cloud Run deployment
+│   └── deploy-frontend.yml  # Cloudflare Pages deployment
+└── docs/                    # Documentation
 ```
 
-### Test Decompression
+## GCP Resources
 
-```bash
-python -c "
-import bz2
-with open('sample.bz2', 'rb') as f:
-    data = bz2.decompress(f.read())
-    print(f'Decompressed {len(data)} bytes')
-    print(data[:500].decode('utf-8'))
-"
-```
-
-## Critical Fixes from v1.0
-
-1. **Pattern Matching**: Added validation to ensure patterns match actual files before pipeline submission
-2. **Path Handling**: Normalized paths to prevent malformed GCS patterns
-3. **Module Staging**: Proper setup.py configuration for Dataflow workers
-4. **Empty Output Files**: Added metrics counters and logging to debug issues
+| Resource | Name/ID |
+|----------|---------|
+| Project | betfair-data-explorer |
+| Cloud Run Service | chimera-dataflow-app |
+| Cloud Run Region | us-central1 |
+| Dataflow Region | us-central1 |
+| Firestore Collection | dataflow-jobs |
 
 ## License
 
-Proprietary - Ascot Wealth Management
+PROPRIETARY - Ascot Wealth Management
