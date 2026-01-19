@@ -1,0 +1,20 @@
+{
+  "name": "chimera-dataflow-app",
+  "version": "2.0.0",
+  "private": true,
+  "description": "CHIMERA DataFlow - Data Transport Pipeline",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "dev:backend": "cd backend && python main.py"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/charles-ascot/chimera-dataflow-app"
+  },
+  "author": "Ascot Wealth Management",
+  "license": "PROPRIETARY"
+}
