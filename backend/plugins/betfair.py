@@ -22,35 +22,31 @@ class BetfairPlugin(SourcePlugin):
     
     def build_patterns(self, bucket: str, paths: List[str]) -> List[str]:
         """Generate GCS patterns for Betfair data.
-        
+
         For Betfair data, we look for .bz2 files in the selected paths
         and all their subdirectories.
-        
+
         Args:
             bucket: GCS bucket name
             paths: List of selected paths
-            
+
         Returns:
             List of GCS patterns like gs://bucket/path/**/*.bz2
         """
         patterns = []
-        
+
         for path in paths:
             clean_path = self.normalize_path(path)
-            
+
             if not clean_path:
-                # Root level - match all bz2 files
-                pattern = f"gs://{bucket}/**/*.bz2"
+                # Root level - match all bz2 files (direct and in subdirs)
+                patterns.append(f"gs://{bucket}/*.bz2")
+                patterns.append(f"gs://{bucket}/**/*.bz2")
             else:
-                # Specific path - match bz2 files in path and subdirectories
-                pattern = f"gs://{bucket}/{clean_path}/**/*.bz2"
-            
-            # Validate before adding
-            if self.validate_pattern(pattern):
-                patterns.append(pattern)
-            else:
-                raise ValueError(f"Invalid pattern generated: {pattern}")
-        
+                # Specific path - match bz2 files directly in folder AND in subdirectories
+                patterns.append(f"gs://{bucket}/{clean_path}/*.bz2")
+                patterns.append(f"gs://{bucket}/{clean_path}/**/*.bz2")
+
         return patterns
     
     def get_decompressor_class(self) -> str:
