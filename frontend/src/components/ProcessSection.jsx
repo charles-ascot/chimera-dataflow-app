@@ -27,9 +27,11 @@ const PROCESS_TYPES = [
 ]
 
 const REGIONS = [
-  { value: 'europe-west2', label: 'europe-west2 (London)' },
-  { value: 'europe-west1', label: 'europe-west1 (Belgium)' },
-  { value: 'us-central1', label: 'us-central1 (Iowa)' }
+  { value: 'europe-west2', label: 'europe-west2 (London)', note: 'Primary - closest to Betfair' },
+  { value: 'europe-west1', label: 'europe-west1 (Belgium)', note: 'Fallback - good availability' },
+  { value: 'europe-west4', label: 'europe-west4 (Netherlands)', note: 'Fallback - good availability' },
+  { value: 'europe-north1', label: 'europe-north1 (Finland)', note: 'Fallback - newer region' },
+  { value: 'us-central1', label: 'us-central1 (Iowa)', note: 'High availability but latency' }
 ]
 
 const WORKER_TYPES = [
@@ -172,6 +174,14 @@ export default function ProcessSection({ config, onChange }) {
             <option key={r.value} value={r.value}>{r.label}</option>
           ))}
         </select>
+        <div className="tier-description">
+          {REGIONS.find(r => r.value === config.region)?.note || ''}
+          {config.region === 'europe-west2' && (
+            <span style={{ color: '#ffc107', marginLeft: '8px' }}>
+              ⚠️ Try europe-west1 or europe-west4 if you get resource errors
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="form-group">
