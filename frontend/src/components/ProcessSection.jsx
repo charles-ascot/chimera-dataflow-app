@@ -35,9 +35,15 @@ const REGIONS = [
 ]
 
 const WORKER_TYPES = [
+  // E2 machines - best availability, cost-effective
+  { value: 'e2-standard-4', label: 'e2-standard-4 (4 vCPU, 16 GB) - Best availability' },
+  { value: 'e2-standard-8', label: 'e2-standard-8 (8 vCPU, 32 GB)' },
+  { value: 'e2-highmem-4', label: 'e2-highmem-4 (4 vCPU, 32 GB)' },
+  // N1 machines - legacy, sometimes less available
   { value: 'n1-standard-4', label: 'n1-standard-4 (4 vCPU, 15 GB)' },
+  { value: 'n1-standard-8', label: 'n1-standard-8 (8 vCPU, 30 GB)' },
+  { value: 'n1-highmem-4', label: 'n1-highmem-4 (4 vCPU, 26 GB)' },
   { value: 'n1-highmem-8', label: 'n1-highmem-8 (8 vCPU, 52 GB)' },
-  { value: 'n1-standard-16', label: 'n1-standard-16 (16 vCPU, 60 GB)' }
 ]
 
 const MAX_WORKERS = [
