@@ -231,13 +231,18 @@ class DataflowRunner:
                 worker_options.max_num_workers = num_workers
             
             # CRITICAL: Zone flexibility to avoid ZONE_RESOURCE_POOL_EXHAUSTED errors
-            # By NOT setting worker_zone, Dataflow will try all available zones in the region
-            # Reference: https://cloud.google.com/dataflow/docs/guides/common-errors#worker-pool-failure
+            # Reference: https://cloud.google.com/dataflow/docs/concepts/regional-endpoints
+            # 
+            # "Regional placement is supported only for jobs using Streaming Engine or Dataflow Shuffle"
+            # By enabling shuffle_mode=service, Dataflow can use ANY zone in the region
+            # instead of picking one zone and failing if it's exhausted
             worker_options.use_public_ips = True  # Required for most network configs
             
-            # Enable Dataflow Shuffle for better performance and resource management
-            # This is compatible with custom machine types (unlike enable_prime)
-            google_cloud_options.dataflow_service_options = ['enable_google_cloud_profiler']
+            # Enable Dataflow Shuffle - this enables true regional (multi-zone) placement
+            # Without this, Dataflow picks ONE zone and fails if that zone is exhausted
+            options.view_as(GoogleCloudOptions).dataflow_service_options = [
+                'shuffle_mode=service'  # Enable Dataflow Shuffle for multi-zone support
+            ]
 
             # Setup options - use setup_file to stage the beam_pipeline module
             setup_options = options.view_as(SetupOptions)
